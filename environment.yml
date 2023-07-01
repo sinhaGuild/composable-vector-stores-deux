@@ -1,0 +1,21 @@
+name: LLAMA
+
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - notebook
+  - pyyaml
+  - python-dotenv
+  - rich
+  - pip
+  - pip:
+    - langchain
+    - openai
+    - google-search-results
+    - llama-index
+    - pypdf
+    - redis
+    - nltk
+    - streamlit
