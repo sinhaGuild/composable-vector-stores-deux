@@ -4,7 +4,6 @@ import sys
 
 import openai
 from dotenv import load_dotenv
-from langchain.agents import Tool, initialize_agent
 from langchain.chains.conversation.memory import ConversationBufferMemory
 from langchain.chat_models import ChatOpenAI
 from llama_index import (
@@ -16,6 +15,8 @@ from llama_index import (
 from llama_index.indices.composability import ComposableGraph
 from llama_index.indices.list.base import ListIndex
 from llama_index.playground import Playground
+from llama_index.query_engine import SubQuestionQueryEngine
+from llama_index.tools import QueryEngineTool, ToolMetadata
 from rich.console import Console
 from rich.markdown import Markdown
 
@@ -59,6 +60,7 @@ class ComposableGraphs:
         self.indices = []
         self.custom_query_engines = {}
         self.index_summaries = []
+        self.query_engine_tools = []
 
         # indexes
         for idx in indices_path:
@@ -69,6 +71,20 @@ class ComposableGraphs:
                 similarity_top_k=3,
                 response_mode="tree_summarize",
             )
+            self.query_engine_tools.append(
+                QueryEngineTool(
+                    query_engine=self.custom_query_engines[index.index_id],
+                    metadata=ToolMetadata(
+                        name=f"{idx.get('index_id')}",
+                        description=f"{idx.get('summary')}",
+                    ),
+                )
+            )
+
+        # compose sub-question query engine
+        self.s_engine = SubQuestionQueryEngine.from_defaults(
+            query_engine_tools=self.query_engine_tools
+        )
 
         # compose graphs
         self.graph_list_parent = self._build_composable_graph_(ListIndex)
@@ -79,51 +95,51 @@ class ComposableGraphs:
 
         self.pg = Playground(indices=self.indices)
 
-    # graphs and inference
-    def call_inference(
-        self,
-        prompt,
-        return_sources=False,
-        use_langchain=False,
-        use_mmr=False,
-        graph_index_type="List",
-        mmr_index=0,
-    ):
-        def call_inference_method(inf, use_langchain, use_mmr):
-            if use_langchain:
-                return inf._inference_langchain_()
-            elif use_mmr:
-                print(f"{inf.prompt=}")
-                return inf._inference_MMR_(self.indices[mmr_index])
-            else:
-                return inf._inference_(self.custom_query_engines)
-
-        if graph_index_type == "List":
-            inf = InferenceLlamaIndex(
+    def create_inference_by_graph_type(self, prompt, graph_index_type):
+        if graph_index_type == "Tree":
+            return InferenceLlamaIndex(
                 prompt=prompt,
-                return_sources=return_sources,
-                graph=self.graph_list_parent,
-            )
-            return call_inference_method(inf, use_langchain, use_mmr)
-
-        elif graph_index_type == "Tree":
-            inf = InferenceLlamaIndex(
-                prompt=prompt,
-                return_sources=return_sources,
                 graph=self.graph_tree_parent,
             )
-            return call_inference_method(inf, use_langchain, use_mmr)
-
         elif graph_index_type == "Keyword":
-            inf = InferenceLlamaIndex(
+            return InferenceLlamaIndex(
                 prompt=prompt,
-                return_sources=return_sources,
                 graph=self.graph_keyword_parent,
             )
+        else:
+            return InferenceLlamaIndex(
+                prompt=prompt,
+                graph=self.graph_list_parent,
+            )
 
-            return call_inference_method(inf, use_langchain, use_mmr)
+    def _inference_LLAMA_(self, prompt, graph_index_type):
+        return self.create_inference_by_graph_type(
+            prompt=prompt, graph_index_type=graph_index_type
+        )._inference_(self.custom_query_engines)
+
+    def _inference_LANGCHAIN_(self, prompt, graph_index_type):
+        return self.create_inference_by_graph_type(
+            prompt=prompt, graph_index_type=graph_index_type
+        )._inference_langchain_(self.custom_query_engines)
+
+    def _inference_MMR_(self, prompt, mmr_index):
+        inf = InferenceLlamaIndex(
+            prompt=prompt,
+            graph=self.graph_list_parent,
+        )
+
+        return inf._inference_MMR_(self.indices[mmr_index])
+
+    def _inference_SQQ_(self, prompt):
+        inf = InferenceLlamaIndex(
+            prompt=prompt,
+            graph=self.graph_list_parent,
+        )
+
+        return inf._inference_SQQ_(self.s_engine)
 
     def playground(self, prompt):
         re = self.pg.compare(prompt, to_pandas=True)
         self._md_(f"### Output: {re['Output']}")
         self._md_(f"> {re}")
+        return re

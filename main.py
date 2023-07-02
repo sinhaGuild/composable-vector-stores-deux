@@ -5,56 +5,9 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from composable_graphs import ComposableGraphs
+from indices import indices, kb
 
 load_dotenv()
-
-kb = """
-Querying the index or a graph involves a three main components:
-
-| Retreivers $\to$                                                        | Response Synthesizer $\to$                                                  | Query Engine                                                                                                                              |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| A retriever class retrieves a set of Nodes from an index given a query. | This class takes in a set of Nodes and synthesizes an answer given a query. | This class takes in a query and returns a Response object. It can make use of Retrievers and Response Synthesizer modules under the hood. |
-
-For the query logic itself we will use maximum marginal relevance or $\mathcal{MMR}$. In this we iteratively find documents that are dissimilar to previous results. It has been shown to improve performance for LLM retrievals [[2]](https://arxiv.org/pdf/2211.13892.pdf).
-"""
-
-indices = [
-    {
-        "path": "storage/vedvyas_Index/",
-        "index_id": "VedVyas",
-        "summary": os.getenv("VYAS_SUMMARY") or "",
-    },
-    {
-        "path": "storage/tulsidas_Index/",
-        "index_id": "Tulsidas",
-        "summary": os.getenv("TULSI_SUMMARY") or "",
-    },
-    {
-        "path": "storage/valmiki_Index/",
-        "index_id": "ShriValmiki",
-        "summary": os.getenv("VALMIKI_SUMMARY") or "",
-    },
-    {
-        "path": "storage/vedas_Index/",
-        "index_id": "vedas",
-        "summary": os.getenv("VEDAS_SUMMARY") or "",
-    },
-    {
-        "path": "storage/mb_Index/",
-        "index_id": "mb",
-        "summary": os.getenv("MB_SUMMARY") or "",
-    },
-    {
-        "path": "storage/puranas_Index/",
-        "index_id": "puranas",
-        "summary": os.getenv("PURANAS_SUMMARY") or "",
-    },
-    {
-        "path": "storage/geeta_Index/",
-        "index_id": "geeta",
-        "summary": os.getenv("GEETA_SUMMARY") or "",
-    },
-]
 
 
 @st.cache_resource
@@ -62,24 +15,8 @@ def compose_graph():
     return ComposableGraphs(indices_path=indices)
 
 
-def inference(
-    prompt,
-    graph_index_type="List",
-    return_sources=True,
-    use_langchain=False,
-    use_mmr=False,
-    mmr_index=0,
-):
-    graph = compose_graph()
-
-    return graph.call_inference(
-        prompt=prompt,
-        return_sources=return_sources,
-        use_langchain=use_langchain,
-        use_mmr=use_mmr,
-        graph_index_type=graph_index_type,
-        mmr_index=mmr_index,
-    )
+# def inference():
+#     return compose_graph()
 
 
 st.set_page_config(layout="wide")
@@ -88,6 +25,7 @@ st.markdown(
 )
 if "history" not in st.session_state:
     st.session_state["history"] = []
+    st.session_state["sources"] = []
 
 st.sidebar.image("https://i.imgur.com/4D2ikLS.png", clamp=True, width=150)
 st.sidebar.markdown("# $\mathbb{Parameters}$")
@@ -95,7 +33,7 @@ st.sidebar.markdown("# $\mathbb{Parameters}$")
 st.sidebar.markdown("### $\mathbf{Retreiver}$")
 select_retreiver = st.sidebar.selectbox(
     "Python Retreival Augmentation Library",
-    ["MMR", "LlamaIndex", "Langchain"],
+    ["MMR", "LlamaIndex", "Langchain", "SQQ"],
 )
 mmr_index = st.sidebar.number_input(
     f"MMR Index {'(MMR Not Selected)' if select_retreiver!='MMR' else ''}",
@@ -114,7 +52,7 @@ st.sidebar.text(
 select_graph_index = st.sidebar.selectbox(
     "Graph Index",
     ["List", "Tree", "Keyword"],
-    disabled=select_retreiver == "MMR",
+    disabled=select_retreiver == "MMR" or select_retreiver == "SQQ",
 )
 st.sidebar.divider()
 st.sidebar.markdown("### $\mathbf{Info}$")
@@ -137,38 +75,49 @@ with st.container():
                 st.divider()
                 if select_retreiver == "Langchain":
                     with st.spinner("Querying Composable graph with Langchain."):
-                        re = inference(
-                            prompt=text,
-                            return_sources=False,
-                            use_langchain=True,
-                            graph_index_type=select_graph_index,
+                        re = compose_graph()._inference_LANGCHAIN_(
+                            prompt=text, graph_index_type=select_graph_index
                         )
                     st.success(re)
                     st.session_state["history"].append(re)
+                    st.session_state["sources"].append("Langchain.")
 
-                elif select_retreiver == "LlamaIndex":
-                    with st.spinner("Querying Composable Graph with Llamaindex"):
-                        re = inference(prompt=text, graph_index_type=select_graph_index)
-
-                    st.success(re)
-                    st.session_state["history"].append(re)
-                    st.divider()
-                    with st.expander("Retreived Sources"):
-                        st.info(re.get_formatted_sources())
                 else:
-                    # print(select_graph_index)
-                    # print(select_retreiver)
-                    with st.spinner(
-                        f"Querying Index {indices[mmr_index]['index_id']} using MMR"
-                    ):
-                        re = inference(
-                            prompt=text,
-                            graph_index_type=select_graph_index,
-                            use_mmr=True,
-                            mmr_index=mmr_index,
-                        )
+                    if select_retreiver == "LlamaIndex":
+                        with st.spinner("Querying Composable Graph with Llamaindex"):
+                            # graph = inference()
+                            re = compose_graph()._inference_LLAMA_(
+                                prompt=text, graph_index_type=select_graph_index
+                            )
+                        # st.success(re)
+                        # st.session_state["history"].append(re)
+                        # st.divider()
+                        # with st.expander("Retreived Sources"):
+                        #     st.info(re.get_formatted_sources())
+                    elif select_retreiver == "SQQ":
+                        with st.spinner("Querying Graph with Sub-Question-Query."):
+                            # graph = inference()
+                            re = compose_graph()._inference_SQQ_(prompt=text)
+                        # st.success(re)
+                        # st.session_state["history"].append(re)
+                        # with st.expander("Retreived Sources"):
+                        #     st.info(re.get_formatted_sources())
+
+                    else:
+                        with st.spinner(
+                            f"Querying Index {indices[mmr_index]['index_id']} using MMR"
+                        ):
+                            re = compose_graph()._inference_MMR_(
+                                prompt=text, mmr_index=mmr_index
+                            )
+                        # st.success(re)
+                        # st.session_state["history"].append(re)
+                        # st.divider()
+                        # with st.expander("Retreived Sources"):
+                        #     st.info(re.get_formatted_sources())
                     st.success(re)
                     st.session_state["history"].append(re)
+                    st.session_state["sources"].append(re.get_formatted_sources())
                     st.divider()
                     with st.expander("Retreived Sources"):
                         st.info(re.get_formatted_sources())
@@ -178,7 +127,9 @@ with st.container():
             hist = ""
             st.markdown("### $\mathbb{HISTORY}$")
             st.divider()
-            for i in reversed(st.session_state.history):
+            for idx, i in enumerate(st.session_state.history):
                 with st.container():
                     st.markdown(f"- Inference @ `{datetime.datetime.now()}`")
                     st.info(i)
+                    with st.expander("Retreived Sources"):
+                        st.markdown(f"{st.session_state.sources[idx]}")

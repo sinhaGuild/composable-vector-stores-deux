@@ -10,7 +10,7 @@ class InferenceLlamaIndex:
         self,
         graph,
         prompt,
-        return_sources,
+        return_sources=True,
         memory_key="chat_history",
         temperature=0,
         max_tokens=500,
@@ -30,6 +30,8 @@ class InferenceLlamaIndex:
 
     # display markdown
     def _md_(self, re, return_sources=False):
+        self.console.print(Markdown(f"Prompt: <br> {self.prompt} <br>  "))
+
         self.console.print(
             Markdown(f"Sources: <br> {re.get_formatted_sources()} <br>  ")
         ) if return_sources else print("")
@@ -49,14 +51,21 @@ class InferenceLlamaIndex:
             vector_store_query_mode="mmr",
             vector_store_kwargs={"mmr_threshold": 0.8},
         )
-        print(f"{self.prompt=}")
+        # print(f"{self.prompt=}")
         re = qe.query(self.prompt)
         self._md_(re, self.return_sources)
         return re
 
+    # Inference through vector indices
+    def _inference_SQQ_(self, s_engine):
+        re = s_engine.query(self.prompt)
+        self._md_(re, self.return_sources)
+        return re
+
     # Inference through langchain
-    def _inference_langchain_(self):
-        qe = self.graph.as_query_engine(custom_query_engines=self.custom_query_engines)
+    def _inference_langchain_(self, custom_query_engines):
+        qe = self.graph.as_query_engine(custom_query_engines=custom_query_engines)
+        # qe = self.graph.as_query_engine(custom_query_engines=self.custom_query_engines)
 
         tool = [
             Tool(
